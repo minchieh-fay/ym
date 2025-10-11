@@ -1,0 +1,105 @@
+version: '3.8'
+
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: ym-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Nginx配置文件
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      # SSL证书挂载
+      - /etc/letsencrypt/live/sk.feyon.vip:/etc/ssl/certs/sk.feyon.vip:ro
+      - /etc/letsencrypt/archive/sk.feyon.vip:/etc/ssl/archive/sk.feyon.vip:ro
+      # 日志目录
+      - ./logs/nginx:/var/log/nginx
+      # 静态文件目录（可选）
+      - ./static:/usr/share/nginx/html
+    networks:
+      - ym-network
+    depends_on:
+      - backend
+    environment:
+      - TZ=Asia/Shanghai
+
+  backend:
+    image: ym-backend:latest
+    container_name: ym-backend
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./config:/app/config:ro
+      - ./logs/backend:/app/logs
+    networks:
+      - ym-network
+    environment:
+      - TZ=Asia/Shanghai
+      - GIN_MODE=release
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: ym-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - ym-network
+    environment:
+      - POSTGRES_DB=group_activity_platform
+      - POSTGRES_USER=app_user
+      - POSTGRES_PASSWORD=your_secure_password
+      - TZ=Asia/Shanghai
+    # 健康检查
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app_user -d group_activity_platform"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    container_name: ym-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./redis/redis.conf:/etc/redis/redis.conf:ro
+    networks:
+      - ym-network
+    command: redis-server /etc/redis/redis.conf
+    environment:
+      - TZ=Asia/Shanghai
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  ym-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
